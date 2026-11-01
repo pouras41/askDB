@@ -1,0 +1,61 @@
+name: askdb
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-askdb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-askdb_local_password}
+      POSTGRES_DB: ${POSTGRES_DB:-askdb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-askdb}:${POSTGRES_PASSWORD:-askdb_local_password}@db:5432/${POSTGRES_DB:-askdb}
+      DEMO_DATABASE_URL: postgresql+psycopg://demo_reader:demo_reader_pass@db:5432/demo
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-please-use-32-plus-characters}
+      UPLOAD_DIR: /data/uploads
+      QUERY_RATE_LIMIT: ${QUERY_RATE_LIMIT:-8}
+      QUERY_DAILY_LIMIT: ${QUERY_DAILY_LIMIT:-40}
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads:
